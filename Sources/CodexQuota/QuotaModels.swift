@@ -24,6 +24,7 @@ struct QuotaSnapshot: Codable, Sendable, Equatable {
     let windowDurationMinutes: Int?
 
     var clampedPercent: Int { min(max(usedPercent, 0), 100) }
+    var remainingPercent: Int { 100 - clampedPercent }
 }
 
 struct LoginInstructions: Sendable, Equatable {

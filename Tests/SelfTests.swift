@@ -20,6 +20,7 @@ struct QuotaParserSelfTests {
         """)
         guard let quota = CodexPayloadParser.weeklyQuota(from: payload) else { throw Failure("Missing weekly quota") }
         try expect(quota.usedPercent == 67, "Expected weekly percent")
+        try expect(quota.remainingPercent == 33, "Expected inverted remaining percent")
         try expect(quota.windowDurationMinutes == 10_080, "Expected weekly duration")
         try expect(quota.resetsAt == Date(timeIntervalSince1970: 1_800_000_000), "Expected reset date")
     }

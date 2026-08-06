@@ -1,13 +1,13 @@
 # Codex Quota
 
-A minimal native macOS menu-bar app for monitoring the weekly Codex quota of up to four ChatGPT accounts.
+A minimal native macOS menu-bar app for monitoring the weekly Codex quota remaining across up to four ChatGPT accounts.
 
 Each account uses its own isolated `CODEX_HOME`. Codex Quota never reads, replaces, or logs out the account used by the official Codex app, CLI, or IDE extension.
 
 ## Features
 
 - Up to four persistent ChatGPT account sessions
-- Weekly Codex usage percentage and reset date
+- Weekly Codex quota remaining and reset date
 - Green, orange, and red quota bars
 - One-click refresh for all accounts or an individual account
 - Automatic refresh every 15 minutes
@@ -35,7 +35,9 @@ From this repository:
 ./scripts/install.sh
 ```
 
-The script builds and ad-hoc signs the app, installs it in `~/Applications`, and launches it. Look for the small chart icon in the macOS menu bar.
+The script builds and ad-hoc signs the app, installs it in `~/Applications`, and launches it. Look for the Codex icon in the macOS menu bar.
+
+Re-running the installer only replaces the application bundle. Existing accounts and login sessions in `~/Library/Application Support/CodexQuota` are preserved.
 
 ## First-time setup
 

@@ -4,33 +4,28 @@ import SwiftUI
 struct QuotaPopoverView: View {
     @ObservedObject var store: AccountStore
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @State private var showAccountActions: UUID?
 
     var body: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+            TahoeTranslucentBackground().ignoresSafeArea()
+            Color.primary.opacity(0.018).ignoresSafeArea()
             VStack(spacing: 0) {
                 header
-                Divider().opacity(0.55)
+                Divider().opacity(0.32)
                 content
-                Divider().opacity(0.55)
+                Divider().opacity(0.32)
                 footer
             }
         }
-        .frame(width: 360)
+        .frame(width: 348)
         .fixedSize(horizontal: false, vertical: true)
         .preferredColorScheme(nil)
     }
 
     private var header: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Codex Quota")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                Text("Weekly usage")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Codex Weekly Quota")
+                .font(.system(size: 13.5, weight: .semibold, design: .rounded))
             Spacer()
             Button {
                 Task { await store.refreshAll() }
@@ -44,7 +39,7 @@ struct QuotaPopoverView: View {
             .disabled(store.accounts.isEmpty || store.isRefreshingAll)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder
@@ -65,7 +60,7 @@ struct QuotaPopoverView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 28)
         } else {
-            VStack(spacing: 0) {
+            VStack(spacing: 2) {
                 ForEach(store.accounts) { account in
                     AccountRow(
                         account: account,
@@ -73,11 +68,9 @@ struct QuotaPopoverView: View {
                         onRefresh: { Task { await store.refresh(account.id) } },
                         onRemove: { Task { await store.remove(account.id) } }
                     )
-                    if account.id != store.accounts.last?.id {
-                        Divider().padding(.leading, 16).opacity(0.4)
-                    }
                 }
             }
+            .padding(.vertical, 4)
         }
 
         if let login = store.activeLogin {
@@ -125,9 +118,12 @@ struct QuotaPopoverView: View {
                 Divider()
                 Button("Quit Codex Quota") { NSApplication.shared.terminate(nil) }
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
         }
         .font(.caption)
@@ -143,36 +139,32 @@ private struct AccountRow: View {
     let onRemove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(account.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text(account.email ?? "Connecting account…")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(account.email == nil ? .secondary : .primary)
+                    .lineLimit(1)
                 Spacer()
                 if state.isBusy {
                     ProgressView().controlSize(.small).scaleEffect(0.7)
                 } else if let quota = account.quota {
-                    Text("\(quota.clampedPercent)%")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(color(for: quota.clampedPercent))
+                    Text("\(quota.remainingPercent)%")
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(color(forRemaining: quota.remainingPercent))
                 }
                 Menu {
                     Button("Refresh", action: onRefresh)
                     Divider()
                     Button("Remove account", role: .destructive, action: onRemove)
                 } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.caption)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 18, height: 18)
+                        .frame(width: 14, height: 16)
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
             }
 
@@ -181,12 +173,12 @@ private struct AccountRow: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(.secondary.opacity(0.16))
                         Capsule()
-                            .fill(color(for: quota.clampedPercent).gradient)
-                            .frame(width: geometry.size.width * CGFloat(quota.clampedPercent) / 100)
+                            .fill(color(forRemaining: quota.remainingPercent))
+                            .frame(width: geometry.size.width * CGFloat(quota.remainingPercent) / 100)
                     }
                 }
-                .frame(height: 6)
-                .animation(.easeOut(duration: 0.35), value: quota.clampedPercent)
+                .frame(height: 4)
+                .animation(.easeOut(duration: 0.35), value: quota.remainingPercent)
 
                 HStack {
                     Text(resetText(for: quota))
@@ -209,20 +201,14 @@ private struct AccountRow: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.vertical, 10)
     }
 
-    private var subtitle: String {
-        let email = account.email ?? "Not connected"
-        guard let plan = account.plan, !plan.isEmpty else { return email }
-        return "\(email) · \(plan.replacingOccurrences(of: "_", with: " ").capitalized)"
-    }
-
-    private func color(for percent: Int) -> Color {
+    private func color(forRemaining percent: Int) -> Color {
         switch percent {
-        case ..<60: return .green
-        case 60..<85: return .orange
-        default: return .red
+        case 50...: return Color(red: 0.32, green: 0.62, blue: 0.46)
+        case 25..<50: return Color(red: 0.76, green: 0.58, blue: 0.31)
+        default: return Color(red: 0.72, green: 0.34, blue: 0.35)
         }
     }
 
@@ -230,6 +216,18 @@ private struct AccountRow: View {
         guard let date = quota.resetsAt else { return "Reset date unavailable" }
         return "Resets \(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
     }
+}
+
+private struct TahoeTranslucentBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .popover
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 private struct LoginBanner: View {

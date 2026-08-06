@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -8,17 +9,23 @@ struct CodexQuotaApp: App {
         MenuBarExtra {
             QuotaPopoverView(store: store)
         } label: {
-            Label("Codex Quota", systemImage: menuBarSymbol)
+            Image(nsImage: menuBarIcon)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 17, height: 17)
+                .accessibilityLabel("Codex Weekly Quota")
         }
         .menuBarExtraStyle(.window)
     }
 
-    private var menuBarSymbol: String {
-        let maximum = store.accounts.compactMap(\.quota?.clampedPercent).max() ?? 0
-        switch maximum {
-        case 85...: return "chart.bar.fill"
-        case 60...: return "chart.bar"
-        default: return "chart.bar.xaxis"
+    private var menuBarIcon: NSImage {
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Assets/codex-mono-dark.png"),
+           let image = NSImage(contentsOf: url) {
+            image.isTemplate = true
+            image.size = NSSize(width: 18, height: 18)
+            return image
         }
+        return NSImage(systemSymbolName: "terminal", accessibilityDescription: "Codex Weekly Quota") ?? NSImage()
     }
 }
