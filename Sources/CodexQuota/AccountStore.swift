@@ -91,14 +91,14 @@ final class AccountStore: ObservableObject {
         await withTaskGroup(of: Void.self) { group in
             for account in accounts {
                 group.addTask { [weak self] in
-                    await self?.refresh(account.id, refreshingToken: true)
+                    await self?.refresh(account.id)
                 }
             }
         }
         isRefreshingAll = false
     }
 
-    func refresh(_ id: UUID, refreshingToken: Bool = true) async {
+    func refresh(_ id: UUID, refreshingToken: Bool = false) async {
         guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
         switch states[id] {
         case .connecting, .awaitingLogin, .refreshing: return
@@ -108,7 +108,18 @@ final class AccountStore: ObservableObject {
         do {
             let client = client(for: id)
             let accountPayload = try await client.account(refreshToken: refreshingToken)
-            guard let identity = CodexPayloadParser.account(from: accountPayload) else {
+            // A forced token refresh can succeed while the current app-server
+            // response omits the account object. Read the account normally
+            // before treating the session as disconnected.
+            let identityPayload: JSONValue
+            if CodexPayloadParser.account(from: accountPayload) != nil {
+                identityPayload = accountPayload
+            } else if refreshingToken {
+                identityPayload = try await client.account(refreshToken: false)
+            } else {
+                identityPayload = accountPayload
+            }
+            guard let identity = CodexPayloadParser.account(from: identityPayload) else {
                 throw CodexClientError.notLoggedIn
             }
             let limitsPayload = try await client.rateLimits()

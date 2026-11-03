@@ -5,8 +5,9 @@ struct QuotaParserSelfTests {
     static func main() throws {
         try selectsLongestWindowAsWeeklyQuota()
         try prefersCodexNamedBucket()
+        try handlesAdditionalLimitBuckets()
         try parsesChatGPTAccount()
-        print("3 parser tests passed")
+        print("4 parser tests passed")
     }
 
     private static func selectsLongestWindowAsWeeklyQuota() throws {
@@ -36,6 +37,26 @@ struct QuotaParserSelfTests {
         }
         """)
         try expect(CodexPayloadParser.weeklyQuota(from: payload)?.usedPercent == 91, "Expected codex bucket")
+    }
+
+    private static func handlesAdditionalLimitBuckets() throws {
+        let payload = try decode("""
+        {
+          "rateLimits": {
+            "limitId": "codex",
+            "primary": {"usedPercent": 100, "windowDurationMins": 10080}
+          },
+          "rateLimitsByLimitId": {
+            "base_model_inference": {
+              "primary": {"usedPercent": 13, "windowDurationMins": 10080}
+            },
+            "codex": {
+              "primary": {"usedPercent": 100, "windowDurationMins": 10080}
+            }
+          }
+        }
+        """)
+        try expect(CodexPayloadParser.weeklyQuota(from: payload)?.usedPercent == 100, "Expected codex bucket over auxiliary bucket")
     }
 
     private static func parsesChatGPTAccount() throws {
