@@ -111,6 +111,16 @@ actor CodexAppServerClient {
         try await request(method: "account/rateLimits/read", params: .object([:]))
     }
 
+    /// Redeems one banked reset. Reusing `idempotencyKey` when retrying the
+    /// same attempt guarantees at most one credit is spent.
+    func consumeResetCredit(idempotencyKey: String) async throws -> ResetOutcome {
+        let result = try await request(method: "account/rateLimitResetCredit/consume", params: .object([
+            "idempotencyKey": .string(idempotencyKey)
+        ]))
+        guard let outcome = result["outcome"]?.stringValue else { throw CodexClientError.malformedResponse }
+        return ResetOutcome(outcome)
+    }
+
     func beginLogin() async throws -> LoginInstructions {
         let result = try await request(method: "account/login/start", params: .object([
             "type": .string("chatgpt"),

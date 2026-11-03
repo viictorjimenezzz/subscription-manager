@@ -45,6 +45,8 @@ struct Vault: Sendable {
 
     var manifestURL: URL { root.appendingPathComponent("accounts.json") }
     var guideURL: URL { root.appendingPathComponent("README.md") }
+    var addGuideURL: URL { root.appendingPathComponent("ADD.md") }
+    var pendingDirectory: URL { root.appendingPathComponent(".pending", isDirectory: true) }
 
     func providerDirectory(_ provider: Provider) -> URL {
         root.appendingPathComponent(provider.rawValue, isDirectory: true)
@@ -274,6 +276,8 @@ struct Vault: Sendable {
         subscription-manager exec codex/<slug> -- codex exec "…"
         ```
 
+        To add a new account, follow `ADD.md` in this folder.
+
         ## Use an account directly
 
         ```sh
@@ -295,7 +299,84 @@ struct Vault: Sendable {
           symlinked into each folder, so changes there apply to every account.
         """
         try? guide.write(to: guideURL, atomically: true, encoding: .utf8)
+        try? Self.addGuide.write(to: addGuideURL, atomically: true, encoding: .utf8)
     }
+
+    /// Instructions for agents that add a subscription on the user's behalf.
+    static let addGuide = """
+    # Adding a subscription to Subscription Manager
+
+    New accounts are added by an agent, not from the menu bar app. Follow these
+    steps exactly; the app picks the account up within seconds of step 4.
+
+    ## 1. Ask the user
+
+    - Which provider: `codex` (ChatGPT / Codex) or `claude` (Claude Code subscription)?
+    - Which email address? Always pass it with `--email`: the command then refuses to
+      save a login for any other account.
+    - Check it is not already there: `subscription-manager list`.
+
+    ## 2. Start the sign-in (in the background)
+
+    ```sh
+    subscription-manager add codex  --email someone@example.com
+    subscription-manager add claude --email someone@example.com
+    ```
+
+    Run it as a background command: it keeps running until the user finishes signing in.
+    It prints a sign-in URL. Give the URL to the user and tell them:
+
+    - The browser must be logged into **that** email. If it is logged into another
+      account, they should open the URL in a private window instead.
+    - Click **Authorize** / **Continue** (not Decline).
+
+    ## 3. If the page shows a code (Claude only)
+
+    When the user opens the URL in a private window, Claude shows a code instead of
+    finishing automatically. Ask the user to paste it to you, then run:
+
+    ```sh
+    subscription-manager add-code '<the code exactly as given>'
+    ```
+
+    ## 4. Wait for the add command to finish
+
+    - Success prints `Added <provider>/<slug> (<email>, <plan>) …`. The folder is
+      named after the email, e.g. `claude/someone-example`.
+    - `signed in as X, not Y; nothing was saved`: the browser used the wrong account.
+      Nothing was kept. Ask the user to switch accounts (or use a private window) and
+      repeat from step 2.
+    - If the user declined or closed the page, the command fails and nothing is kept;
+      just run it again.
+
+    Confirm with `subscription-manager list`.
+
+    ## Bringing in a login that already exists on this Mac
+
+    Only when the user explicitly asks to move their current default login (the one
+    plain `codex` or `claude` uses) into Subscription Manager instead of signing in again:
+
+    ```sh
+    subscription-manager add codex  --email someone@example.com --from-default
+    subscription-manager add claude --email someone@example.com --from-default
+    ```
+
+    This **moves** the login: afterwards plain `codex` / `claude` (without
+    `CODEX_HOME` / `CLAUDE_CONFIG_DIR`) is logged out. Before running it for Codex,
+    the user should quit the ChatGPT app and stop the Codex background service
+    (`pkill -f "app-server --listen unix://"`), because those processes keep the old
+    session in memory and would otherwise write a second copy back. For Claude, any
+    Claude Code session running on the default login (possibly your own) is logged
+    out, so do it last and warn the user first.
+
+    ## Never
+
+    - Never copy `auth.json` files or Keychain entries; refresh tokens rotate and
+      copies sign each other out.
+    - Never edit `accounts.json` by hand to add accounts.
+    - Never create, rename or move account folders yourself: Claude Code logins are
+      keyed on the exact folder path.
+    """
 }
 
 enum VaultError: LocalizedError {

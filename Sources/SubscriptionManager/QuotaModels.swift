@@ -32,7 +32,7 @@ enum Provider: String, Codable, CaseIterable, Sendable, Identifiable {
 
     var logoAsset: String {
         switch self {
-        case .codex: return "openai-white.png"
+        case .codex: return "openai-logo.png"
         case .claude: return "claude-color.png"
         }
     }
@@ -110,8 +110,22 @@ struct QuotaWindow: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// Banked rate-limit resets (Codex grants these occasionally).
+struct ResetCredits: Codable, Sendable, Equatable {
+    let available: Int
+    let nextExpiry: Date?
+}
+
+/// Prepaid ChatGPT credits that keep Codex usable past the plan limits.
+struct CreditBalance: Codable, Sendable, Equatable {
+    let balance: Double?
+    let unlimited: Bool
+}
+
 struct QuotaSnapshot: Codable, Sendable, Equatable {
     let windows: [QuotaWindow]
+    var resetCredits: ResetCredits? = nil
+    var credits: CreditBalance? = nil
 
     /// The headline weekly window, falling back to the longest window reported.
     var weekly: QuotaWindow? {
@@ -133,6 +147,34 @@ struct AccountStatus: Sendable, Equatable {
     let email: String?
     let plan: String?
     let quota: QuotaSnapshot
+}
+
+enum ResetOutcome: Sendable, Equatable {
+    case reset
+    case nothingToReset
+    case noCredit
+    case alreadyRedeemed
+    case other(String)
+
+    init(_ raw: String) {
+        switch raw {
+        case "reset": self = .reset
+        case "nothingToReset": self = .nothingToReset
+        case "noCredit": self = .noCredit
+        case "alreadyRedeemed": self = .alreadyRedeemed
+        default: self = .other(raw)
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .reset: return "Reset applied."
+        case .nothingToReset: return "Nothing to reset: no current limit is eligible, so no credit was used."
+        case .noCredit: return "No banked resets are available for this account."
+        case .alreadyRedeemed: return "This reset was already applied."
+        case .other(let raw): return "Codex answered “\(raw)”."
+        }
+    }
 }
 
 struct LoginInstructions: Sendable, Equatable {
@@ -181,7 +223,30 @@ enum CodexPayloadParser {
             .compactMap { $0 }
             .filter { $0 != .null }
             .compactMap(window(from:))
-        return windows.isEmpty ? nil : QuotaSnapshot(windows: windows)
+        return windows.isEmpty ? nil : QuotaSnapshot(
+            windows: windows,
+            resetCredits: resetCredits(from: value),
+            credits: credits(from: rootSnapshot["credits"])
+        )
+    }
+
+    static func credits(from value: JSONValue?) -> CreditBalance? {
+        guard let value, value != .null else { return nil }
+        let unlimited = value["unlimited"]?.boolValue ?? false
+        let balance = value["balance"]?.stringValue.flatMap(Double.init) ?? value["balance"].flatMap { v -> Double? in
+            if case .number(let n) = v { return n }
+            return nil
+        }
+        guard unlimited || value["hasCredits"]?.boolValue == true || balance != nil else { return nil }
+        return CreditBalance(balance: balance, unlimited: unlimited)
+    }
+
+    static func resetCredits(from value: JSONValue) -> ResetCredits? {
+        guard let credits = value["rateLimitResetCredits"], credits != .null else { return nil }
+        let available = credits["credits"]?.arrayValue?.filter { $0["status"]?.stringValue == "available" } ?? []
+        let count = credits["availableCount"]?.intValue ?? available.count
+        let expiry = available.compactMap { $0["expiresAt"]?.intValue }.min()
+        return ResetCredits(available: count, nextExpiry: expiry.map { Date(timeIntervalSince1970: TimeInterval($0)) })
     }
 
     private static func window(from value: JSONValue) -> QuotaWindow? {

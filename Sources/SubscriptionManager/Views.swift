@@ -49,17 +49,14 @@ struct QuotaPopoverView: View {
                 Image(systemName: "gauge.with.dots.needle.33percent")
                     .font(.system(size: 28, weight: .light))
                     .foregroundStyle(.secondary)
-                Text("Keep every Codex and Claude account in view.")
+                Text("No subscriptions yet.")
                     .font(.system(size: 13, weight: .medium))
-                HStack(spacing: 8) {
-                    ForEach(Provider.allCases) { provider in
-                        Button("Connect \(provider.displayName)") {
-                            Task { await store.addAccount(provider) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
-                }
+                Text("Ask your agent to add one. It follows ADD.md in the credentials folder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Open ADD.md") { NSWorkspace.shared.open(store.vault.addGuideURL) }
+                    .controlSize(.small)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 28)
@@ -91,6 +88,20 @@ struct QuotaPopoverView: View {
             )
         }
 
+        if let notice = store.notice {
+            HStack(alignment: .firstTextBaseline) {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("OK") { store.notice = nil }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+            .padding(12)
+        }
+
         if let error = store.globalError {
             Text(error)
                 .font(.caption)
@@ -102,20 +113,14 @@ struct QuotaPopoverView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            Menu {
-                ForEach(Provider.allCases) { provider in
-                    Button(provider.displayName) {
-                        Task { await store.addAccount(provider) }
-                    }
-                    .disabled(!store.canAddAccount(provider))
-                }
+            Button {
+                NSWorkspace.shared.open(store.vault.addGuideURL)
             } label: {
-                Label("Add account", systemImage: "plus")
+                Label("Adding accounts", systemImage: "questionmark.circle")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .disabled(store.activeLogin != nil)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("New subscriptions are added by an agent following ADD.md")
 
             Spacer()
             Menu {
@@ -192,22 +197,24 @@ private struct AccountRow: View {
 
     @State private var editingSlug: String?
     @State private var renameError: String?
+    @State private var confirmingReset = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(account.email ?? (state == .awaitingLogin ? "Waiting for sign-in…" : "Connecting account…"))
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(account.email == nil ? .secondary : .primary)
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(account.reference)
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                         .truncationMode(.middle)
+                    if let plan = account.plan {
+                        Text("· \(plan)")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize()
+                    }
                 }
-                Spacer()
+                .lineLimit(1)
+                Spacer(minLength: 6)
                 if state.isBusy {
                     ProgressView().controlSize(.small).scaleEffect(0.7)
                 } else if let weekly = account.quota?.weekly {
@@ -222,12 +229,28 @@ private struct AccountRow: View {
                 renameEditor
             }
 
+            if confirmingReset {
+                resetConfirmation
+            }
+
             if let quota = account.quota, let weekly = quota.weekly {
                 QuotaBar(remaining: weekly.remainingPercent, color: color(forRemaining: weekly.remainingPercent))
 
                 HStack(spacing: 10) {
-                    Text(resetText(for: weekly))
-                    Spacer()
+                    HStack(spacing: 4) {
+                        Text(resetText(for: weekly))
+                        if let credits = quota.resetCredits, credits.available > 0 {
+                            Text("· \(credits.available) available")
+                                .help("Banked resets. Apply one from the ⋯ menu."
+                                      + (credits.nextExpiry.map { " The next one expires \($0.formatted(date: .abbreviated, time: .omitted))." } ?? ""))
+                        }
+                    }
+                    .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let credits = quota.credits {
+                        Text("Credits \(creditText(credits))")
+                            .help("ChatGPT credits balance")
+                    }
                     ForEach(secondaryWindows(quota)) { window in
                         Text("\(window.label) \(window.remainingPercent)%")
                             .foregroundStyle(window.remainingPercent < 25 ? AnyShapeStyle(color(forRemaining: window.remainingPercent)) : AnyShapeStyle(.tertiary))
@@ -267,14 +290,16 @@ private struct AccountRow: View {
         }
     }
 
-    private var subtitle: String {
-        [account.reference, account.plan].compactMap { $0 }.joined(separator: " · ")
+    private var bankedResets: Int { account.quota?.resetCredits?.available ?? 0 }
+
+    private func creditText(_ credits: CreditBalance) -> String {
+        if credits.unlimited { return "∞" }
+        guard let balance = credits.balance else { return "–" }
+        return balance.formatted(.number.precision(.fractionLength(0)))
     }
 
     private var rowMenu: some View {
         Menu {
-            Button("Refresh") { Task { await store.refresh(account.id) } }
-            Divider()
             Button("Copy environment for agents") {
                 copyToPasteboard(EnvironmentSnippet.lines(provider: account.provider, home: store.homePath(for: account), shell: .current).joined(separator: "\n"))
             }
@@ -286,19 +311,48 @@ private struct AccountRow: View {
                 renameError = nil
                 editingSlug = account.slug
             }
+            if account.provider == .codex {
+                Divider()
+                Button(bankedResets > 0 ? "Apply reset… (\(bankedResets) banked)" : "No banked resets") {
+                    confirmingReset = true
+                }
+                .disabled(bankedResets == 0 || state.isBusy)
+            }
             Divider()
             Button("Sign in again") { Task { await store.reconnect(account.id) } }
                 .disabled(store.activeLogin != nil || state.isBusy)
             Button("Remove account", role: .destructive) { Task { await store.remove(account.id) } }
         } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .semibold))
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 14, height: 16)
+                .frame(width: 18, height: 16)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    private var resetConfirmation: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Use 1 of \(bankedResets) banked resets? Codex resets this account's current limits now. If nothing is eligible, no credit is used.")
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Apply reset") {
+                    confirmingReset = false
+                    Task { await store.applyReset(account.id) }
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                Button("Cancel") { confirmingReset = false }
+                    .controlSize(.small)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.secondary.opacity(0.08)))
     }
 
     private var renameEditor: some View {

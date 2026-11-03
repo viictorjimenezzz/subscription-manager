@@ -33,7 +33,7 @@ enum EnvironmentSnippet {
 /// stored in the credentials folder. It only reads the manifest the app keeps
 /// up to date, so it is fast and never touches credentials.
 enum CommandLineTool {
-    static let commands: Set<String> = ["list", "ls", "env", "path", "exec", "pick", "help", "--help", "-h", "version", "--version"]
+    static let commands: Set<String> = ["list", "ls", "env", "path", "exec", "pick", "add", "add-code", "reset", "help", "--help", "-h", "version", "--version"]
 
     static func shouldHandle(_ arguments: [String]) -> Bool {
         guard let first = arguments.first else { return false }
@@ -51,6 +51,9 @@ enum CommandLineTool {
             case "path": return try path(arguments, vault: vault)
             case "exec": return try exec(arguments, vault: vault)
             case "pick": return try pick(arguments, vault: vault)
+            case "add": return try AccountOnboarding.add(arguments, vault: vault)
+            case "add-code": return try AccountOnboarding.addCode(arguments, vault: vault)
+            case "reset": return try AccountOnboarding.reset(arguments, vault: vault, accounts: try load(vault))
             case "version", "--version":
                 print(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
                 return 0
@@ -79,6 +82,10 @@ enum CommandLineTool {
       env <account> [--fish|--sh]    Print shell lines that select an account
       path <account>                 Print the account folder
       exec <account> -- <command…>   Run a command as that account
+      reset <account> [--yes]        Show or apply a banked Codex reset
+      add <codex|claude> [--email E] [--slug S] [--from-default]
+                                     Sign in a new account (see ADD.md)
+      add-code <code> [--slug S]     Send the code shown after a Claude sign-in
       help                           Show this help
 
     <account> may be <provider>/<slug>, a unique slug, or an email address.

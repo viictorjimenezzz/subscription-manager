@@ -8,6 +8,8 @@ struct SubscriptionManagerSelfTests {
             ("codex: prefers codex bucket", prefersCodexNamedBucket),
             ("codex: ignores auxiliary buckets", handlesAdditionalLimitBuckets),
             ("codex: parses ChatGPT account", parsesChatGPTAccount),
+            ("codex: parses banked resets", parsesResetCredits),
+            ("codex: maps reset outcomes", mapsResetOutcomes),
             ("claude: parses /usage output", parsesClaudeUsage),
             ("claude: parses time-only and next-year resets", parsesClaudeResetVariants),
             ("claude: ignores unrelated output", ignoresLoggedOutUsage),
@@ -93,6 +95,39 @@ struct SubscriptionManagerSelfTests {
         guard let account = CodexPayloadParser.account(from: payload) else { throw Failure("Missing account") }
         try expect(account.email == "me@example.com", "Expected email")
         try expect(account.plan == "plus", "Expected plan")
+    }
+
+    private static func parsesResetCredits() throws {
+        let payload = try decode("""
+        {
+          "rateLimitsByLimitId": {"codex": {"primary": {"usedPercent": 100, "windowDurationMins": 10080}}},
+          "rateLimitResetCredits": {
+            "availableCount": 2,
+            "credits": [
+              {"id": "a", "status": "available", "resetType": "codexRateLimits", "grantedAt": 1793478676, "expiresAt": 1796165951},
+              {"id": "b", "status": "available", "resetType": "codexRateLimits", "grantedAt": 1793573951, "expiresAt": 1796070676},
+              {"id": "c", "status": "redeemed", "resetType": "codexRateLimits", "grantedAt": 1790000000, "expiresAt": 1700000000}
+            ]
+          }
+        }
+        """)
+        let credits = CodexPayloadParser.quota(from: payload)?.resetCredits
+        let balance = CodexPayloadParser.quota(from: try decode("""
+        {"rateLimitsByLimitId": {"codex": {"primary": {"usedPercent": 100, "windowDurationMins": 10080},
+         "credits": {"balance": "9452.9336150000", "hasCredits": true, "unlimited": false}}}}
+        """))?.credits
+        try expect(balance == CreditBalance(balance: 9452.933615, unlimited: false), "Expected credit balance, got \(String(describing: balance))")
+        try expect(credits?.available == 2, "Expected two banked resets")
+        try expect(credits?.nextExpiry == Date(timeIntervalSince1970: 1_796_070_676), "Expected soonest expiry of available credits")
+
+        let none = try decode(#"{"rateLimits": {"primary": {"usedPercent": 5, "windowDurationMins": 10080}}}"#)
+        try expect(CodexPayloadParser.quota(from: none)?.resetCredits == nil, "Expected no reset info")
+    }
+
+    private static func mapsResetOutcomes() throws {
+        try expect(ResetOutcome("reset") == .reset && ResetOutcome("noCredit") == .noCredit, "Expected known outcomes")
+        try expect(ResetOutcome("nothingToReset") == .nothingToReset && ResetOutcome("alreadyRedeemed") == .alreadyRedeemed, "Expected known outcomes")
+        try expect(ResetOutcome("future") == .other("future"), "Expected unknown outcome to be kept")
     }
 
     // MARK: Claude

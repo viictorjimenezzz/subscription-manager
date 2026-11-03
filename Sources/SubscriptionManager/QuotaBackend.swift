@@ -7,6 +7,7 @@ protocol QuotaBackend: Actor {
     func submitLoginCode(_ code: String, loginID: String) async throws
     func cancelLogin(id: String) async
     func status(refreshingToken: Bool) async throws -> AccountStatus
+    func applyResetCredit(idempotencyKey: String) async throws -> ResetOutcome
     func logout() async
     func stop() async
 }
@@ -74,6 +75,10 @@ enum ExecutableLocator {
 extension CodexAppServerClient: QuotaBackend {
     func submitLoginCode(_ code: String, loginID: String) async throws {
         throw CodexClientError.rpc(0, "Codex sign-in finishes in the browser.")
+    }
+
+    func applyResetCredit(idempotencyKey: String) async throws -> ResetOutcome {
+        try await consumeResetCredit(idempotencyKey: idempotencyKey)
     }
 
     func status(refreshingToken: Bool) async throws -> AccountStatus {

@@ -257,6 +257,10 @@ actor ClaudeCLIClient: QuotaBackend {
         finishLogin(success: false)
     }
 
+    func applyResetCredit(idempotencyKey: String) async throws -> ResetOutcome {
+        throw ClaudeClientError.commandFailed("Claude Code has no banked resets.")
+    }
+
     func logout() async {
         _ = try? await runClaude(["auth", "logout"], timeout: 30)
     }
@@ -323,16 +327,46 @@ enum ClaudeKeychain {
         return !name.isEmpty && name.unicodeScalars.allSatisfy(allowed.contains) ? name : "claude-code-user"
     }
 
+    /// The item used by a plain `claude` with no `CLAUDE_CONFIG_DIR`.
+    static let defaultServiceName = "Claude Code-credentials"
+
     private static let security = URL(fileURLWithPath: "/usr/bin/security")
 
     static func read(configDirectory: String) async throws -> Data? {
-        let result = try await ProcessRunner.run(security, ["find-generic-password", "-a", accountName, "-s", serviceName(configDirectory: configDirectory), "-w"], timeout: 20)
+        try await read(service: serviceName(configDirectory: configDirectory))
+    }
+
+    static func write(_ secret: Data, configDirectory: String) async throws {
+        try await write(secret, service: serviceName(configDirectory: configDirectory))
+    }
+
+    static func delete(configDirectory: String) async {
+        await delete(service: serviceName(configDirectory: configDirectory))
+    }
+
+    static func read(service: String) async throws -> Data? {
+        let result = try await ProcessRunner.run(security, ["find-generic-password", "-a", accountName, "-s", service, "-w"], timeout: 20)
         guard result.status == 0 else { return nil }
         var data = result.stdout
         if data.last == 0x0A { data.removeLast() }
         // `security -w` prints the value as hex when it holds non-ASCII bytes.
         // The stored value is JSON, so plain output is never pure hex.
         return decodeHex(data) ?? data
+    }
+
+    /// Writes through `security -i` so the secret never appears in a process
+    /// argument list.
+    static func write(_ secret: Data, service: String) async throws {
+        let hex = secret.map { String(format: "%02x", $0) }.joined()
+        let command = "add-generic-password -U -a \"\(accountName)\" -s \"\(service)\" -X \"\(hex)\"\n"
+        let result = try await ProcessRunner.run(security, ["-i"], input: Data(command.utf8), timeout: 20)
+        guard result.status == 0 else {
+            throw ClaudeClientError.keychain(result.errorOutput.isEmpty ? "security exited with \(result.status)" : result.errorOutput)
+        }
+    }
+
+    static func delete(service: String) async {
+        _ = try? await ProcessRunner.run(security, ["delete-generic-password", "-a", accountName, "-s", service], timeout: 20)
     }
 
     private static func decodeHex(_ data: Data) -> Data? {
@@ -348,20 +382,5 @@ enum ClaudeKeychain {
             index = next
         }
         return bytes
-    }
-
-    /// Writes through `security -i` so the secret never appears in a process
-    /// argument list.
-    static func write(_ secret: Data, configDirectory: String) async throws {
-        let hex = secret.map { String(format: "%02x", $0) }.joined()
-        let command = "add-generic-password -U -a \"\(accountName)\" -s \"\(serviceName(configDirectory: configDirectory))\" -X \"\(hex)\"\n"
-        let result = try await ProcessRunner.run(security, ["-i"], input: Data(command.utf8), timeout: 20)
-        guard result.status == 0 else {
-            throw ClaudeClientError.keychain(result.errorOutput.isEmpty ? "security exited with \(result.status)" : result.errorOutput)
-        }
-    }
-
-    static func delete(configDirectory: String) async {
-        _ = try? await ProcessRunner.run(security, ["delete-generic-password", "-a", accountName, "-s", serviceName(configDirectory: configDirectory)], timeout: 20)
     }
 }

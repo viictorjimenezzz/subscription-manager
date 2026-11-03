@@ -4,17 +4,20 @@ import ServiceManagement
 
 @MainActor
 final class AccountStore: ObservableObject {
-    static let maximumAccountsPerProvider = 6
-
     @Published private(set) var accounts: [AccountRecord] = []
     @Published private(set) var states: [UUID: AccountRuntimeState] = [:]
     @Published var activeLogin: (accountID: UUID, instructions: LoginInstructions)?
     @Published var globalError: String?
+    /// Neutral feedback, such as the result of applying a reset.
+    @Published var notice: String?
     @Published private(set) var isRefreshingAll = false
 
     private(set) var vault: Vault
     private var backends: [UUID: any QuotaBackend] = [:]
     private var refreshTask: Task<Void, Never>?
+    private var manifestWatcher: DispatchSourceFileSystemObject?
+    /// Accounts removed in this session, so a stale manifest cannot revive them.
+    private var removedIDs = Set<UUID>()
 
     init(vault: Vault = Vault(), startAutomaticRefresh: Bool = true) {
         self.vault = vault
@@ -62,28 +65,9 @@ final class AccountStore: ObservableObject {
         accounts.filter { $0.provider == provider }
     }
 
-    func canAddAccount(_ provider: Provider) -> Bool {
-        accounts(for: provider).count < Self.maximumAccountsPerProvider
-    }
-
     func homePath(for account: AccountRecord) -> String { vault.homePath(for: account) }
 
     // MARK: Login
-
-    func addAccount(_ provider: Provider) async {
-        guard canAddAccount(provider), activeLogin == nil else { return }
-        globalError = nil
-        let record = AccountRecord(provider: provider, slug: Vault.provisionalSlug())
-        do {
-            try vault.prepareHome(for: record)
-        } catch {
-            globalError = "Could not create the account folder: \(error.localizedDescription)"
-            return
-        }
-        accounts.append(record)
-        persist()
-        await signIn(record.id)
-    }
 
     /// Signs in again inside the existing folder, so the account keeps its
     /// name, settings and history and agents keep working.
@@ -138,6 +122,37 @@ final class AccountStore: ObservableObject {
         activeLogin = nil
         states[login.accountID] = .failed("Login cancelled.")
         await backend.cancelLogin(id: login.instructions.loginID)
+    }
+
+    // MARK: Banked resets
+
+    /// Spends one banked Codex reset. The same idempotency key is reused for
+    /// the retry, so at most one credit is consumed.
+    func applyReset(_ id: UUID) async {
+        guard let account = accounts.first(where: { $0.id == id }), account.provider == .codex else { return }
+        switch states[id] {
+        case .connecting, .awaitingLogin, .refreshing: return
+        default: break
+        }
+        states[id] = .refreshing
+        notice = nil
+        let key = UUID().uuidString
+        var outcome: ResetOutcome?
+        var lastError: Error?
+        for _ in 0..<2 where outcome == nil {
+            do {
+                outcome = try await backend(for: account).applyResetCredit(idempotencyKey: key)
+            } catch {
+                lastError = error
+            }
+        }
+        states[id] = .idle
+        if let outcome {
+            notice = "\(account.reference): \(outcome.message)"
+        } else {
+            globalError = "\(account.reference): could not apply the reset (\(lastError?.localizedDescription ?? "unknown error"))."
+        }
+        await refresh(id)
     }
 
     // MARK: Refresh
@@ -243,6 +258,7 @@ final class AccountStore: ObservableObject {
         let backend = backends.removeValue(forKey: id) ?? makeBackend(for: account)
         await backend.logout()
         await backend.stop()
+        removedIDs.insert(id)
         accounts.removeAll { $0.id == id }
         states.removeValue(forKey: id)
         vault.removeHome(of: account)
@@ -306,6 +322,41 @@ final class AccountStore: ObservableObject {
         states = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.quota == nil ? .idle : .ready) })
         vault.writeAgentGuide()
         persist()
+        watchManifest()
+    }
+
+    // MARK: Accounts added from the command line
+
+    /// `subscription-manager add` writes new accounts straight into the
+    /// manifest. Watching the vault folder lets the app adopt them at once.
+    private func watchManifest() {
+        manifestWatcher?.cancel()
+        let descriptor = Darwin.open(vault.root.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: .write, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { _ = self?.adoptExternalAccounts() }
+        }
+        source.setCancelHandler { Darwin.close(descriptor) }
+        source.resume()
+        manifestWatcher = source
+    }
+
+    /// Adds manifest records this app instance does not know yet and reads
+    /// their quota. Returns whether anything was added.
+    @discardableResult
+    private func adoptExternalAccounts() -> Bool {
+        guard let disk = try? vault.loadAccounts() else { return false }
+        let known = Set(accounts.map(\.id))
+        let added = disk.filter { !known.contains($0.id) && !removedIDs.contains($0.id) }
+        guard !added.isEmpty else { return false }
+        for account in added {
+            accounts.append(account)
+            states[account.id] = account.quota == nil ? .idle : .ready
+            SharedConfig.link(provider: account.provider, into: vault.home(for: account))
+            Task { await refresh(account.id) }
+        }
+        return true
     }
 
     /// Moves the Quota Manager folder (`~/.quota-manager`) to the current
@@ -350,6 +401,7 @@ final class AccountStore: ObservableObject {
     }
 
     private func persist() {
+        adoptExternalAccounts()
         do {
             try vault.save(accounts)
         } catch {

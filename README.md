@@ -6,7 +6,8 @@ Each account lives in its own folder under `~/.subscription-manager`. Subscripti
 
 ## Features
 
-- Up to six Codex and six Claude Code accounts, each permanently logged in
+- Any number of Codex and Claude Code accounts, each permanently logged in
+- Banked Codex resets shown per account, and applied from the account's **⋯** menu
 - Weekly quota, 5-hour session quota and per-model weekly limits, with reset times
 - Green, orange, and red quota bars
 - Automatic refresh every 15 minutes, or on demand
@@ -40,11 +41,20 @@ Re-enable "Launch at login" from the menu afterwards, because the app has a new 
 
 ## Adding accounts
 
-1. Click the menu-bar icon, then **Add account** › **Codex** or **Claude Code**.
-2. Finish signing in in the browser window that opens. For Claude Code, if the browser shows a code instead of returning automatically, paste it into the field in the popover.
-3. The account folder is named after the email, for example `claude/victor-uthereal`. Use **Rename folder…** in the account's menu to choose another name.
+Accounts are added by an agent, not from the app. Ask your agent to add one; it follows `~/.subscription-manager/ADD.md`, which boils down to:
+
+```sh
+subscription-manager add claude --email someone@example.com   # prints a sign-in URL
+subscription-manager add-code '<code>'                         # only if Claude shows a code
+```
+
+Open the URL in a browser logged into that email (or a private window) and approve. The command signs in inside a new folder named after the email (for example `claude/someone-example`), refuses to save a login for any other email, and registers the account; the running app shows it within seconds. With `--from-default` it instead moves the login that plain `codex` or `claude` uses into Subscription Manager.
 
 Both CLIs refresh their tokens automatically. A new browser login is only needed if a provider revokes the session; then click **Sign in** on the account row. It signs in again inside the same folder, so the account keeps its name and agents keep working.
+
+## Banked resets (Codex)
+
+Codex occasionally grants free rate-limit resets. Each Codex row shows how many are banked. To spend one, open the row's **⋯** menu and choose **Apply reset…**, then confirm. If no current limit is eligible, Codex reports it and no credit is used. Agents can do the same with `subscription-manager reset codex/<slug>` (shows the count) and `--yes` (applies one, only after the user agrees). Claude Code has no equivalent.
 
 ## Switching accounts from agents
 

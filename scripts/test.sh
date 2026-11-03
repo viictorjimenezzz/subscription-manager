@@ -14,6 +14,7 @@ swiftc \
   "$sources/ClaudeUsageParser.swift" \
   "$sources/Vault.swift" \
   "$sources/CommandLineTool.swift" \
+  "$sources/AccountOnboarding.swift" \
   "$sources/QuotaBackend.swift" \
   "$sources/CodexAppServerClient.swift" \
   "$sources/ClaudeCLIClient.swift" \
