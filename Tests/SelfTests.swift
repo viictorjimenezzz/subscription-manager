@@ -1,7 +1,7 @@
 import Foundation
 
 @main
-struct QuotaManagerSelfTests {
+struct SubscriptionManagerSelfTests {
     static func main() throws {
         let tests: [(String, () throws -> Void)] = [
             ("codex: selects weekly and session windows", selectsWeeklyAndSessionWindows),
@@ -143,8 +143,8 @@ struct QuotaManagerSelfTests {
     }
 
     private static func claudeKeychainServiceName() throws {
-        let name = ClaudeKeychain.serviceName(configDirectory: "/Users/test/.quota-manager/claude/work")
-        try expect(name == "Claude Code-credentials-a48f36e2", "Unexpected service name \(name)")
+        let name = ClaudeKeychain.serviceName(configDirectory: "/Users/test/.subscription-manager/claude/work")
+        try expect(name == "Claude Code-credentials-d3de09b1", "Unexpected service name \(name)")
     }
 
     private static func extractsAuthorizationURL() throws {
@@ -260,8 +260,8 @@ struct QuotaManagerSelfTests {
     }
 
     private static func environmentSnippets() throws {
-        let posix = EnvironmentSnippet.lines(provider: .claude, home: "/Users/x/.quota-manager/claude/work", shell: .posix)
-        try expect(posix == ["export CLAUDE_CONFIG_DIR='/Users/x/.quota-manager/claude/work'", "unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN"], "Unexpected POSIX snippet \(posix)")
+        let posix = EnvironmentSnippet.lines(provider: .claude, home: "/Users/x/.subscription-manager/claude/work", shell: .posix)
+        try expect(posix == ["export CLAUDE_CONFIG_DIR='/Users/x/.subscription-manager/claude/work'", "unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN"], "Unexpected POSIX snippet \(posix)")
         let fish = EnvironmentSnippet.lines(provider: .codex, home: "/tmp/it's", shell: .fish)
         try expect(fish == ["set -gx CODEX_HOME '/tmp/it'\\''s'"], "Unexpected fish snippet \(fish)")
     }
@@ -269,7 +269,7 @@ struct QuotaManagerSelfTests {
     // MARK: Helpers
 
     private static func temporaryDirectory() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("quota-manager-test-\(UUID().uuidString)", isDirectory: true)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("subscription-manager-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.resolvingSymlinksInPath()
     }

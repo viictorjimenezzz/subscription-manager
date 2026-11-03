@@ -12,7 +12,7 @@ enum CodexClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .executableNotFound:
-            return "Codex CLI was not found. Install it (brew install --cask codex), then reopen Quota Manager."
+            return "Codex CLI was not found. Install it (brew install --cask codex), then reopen Subscription Manager."
         case .launchFailed(let detail): return "Could not start Codex: \(detail)"
         case .serverStopped(let detail): return "Codex stopped unexpectedly: \(detail)"
         case .malformedResponse: return "Codex returned an unreadable response."
@@ -93,9 +93,9 @@ actor CodexAppServerClient {
 
         _ = try await requestRaw(method: "initialize", params: .object([
             "clientInfo": .object([
-                "name": .string("quota-manager"),
-                "title": .string("Quota Manager"),
-                "version": .string("2.0.0")
+                "name": .string("subscription-manager"),
+                "title": .string("Subscription Manager"),
+                "version": .string("3.0.0")
             ]),
             "capabilities": .object(["experimentalApi": .bool(true)])
         ]))

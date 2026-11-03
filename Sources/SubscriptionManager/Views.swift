@@ -24,7 +24,7 @@ struct QuotaPopoverView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Quota Manager")
+            Text("Subscription Manager")
                 .font(.system(size: 13.5, weight: .semibold, design: .rounded))
             Spacer()
             Button {
@@ -134,7 +134,7 @@ struct QuotaPopoverView: View {
                 Button("Open credentials folder") { NSWorkspace.shared.open(store.vault.root) }
                 Button("Copy credentials folder path") { copyToPasteboard(store.vault.root.path) }
                 Divider()
-                Button("Quit Quota Manager") { NSApplication.shared.terminate(nil) }
+                Button("Quit Subscription Manager") { NSApplication.shared.terminate(nil) }
             } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
@@ -174,7 +174,11 @@ private struct ProviderLogo: View {
     var body: some View {
         if let url = Bundle.main.resourceURL?.appendingPathComponent("Assets/\(provider.logoAsset)"),
            let image = NSImage(contentsOf: url) {
-            Image(nsImage: image).resizable().scaledToFit()
+            Image(nsImage: image)
+                .renderingMode(provider.logoIsTemplate ? .template : .original)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(.primary)
         } else {
             Image(systemName: provider == .codex ? "terminal" : "asterisk").resizable().scaledToFit()
         }

@@ -12,23 +12,21 @@ final class AccountStore: ObservableObject {
     @Published var globalError: String?
     @Published private(set) var isRefreshingAll = false
 
-    let vault: Vault
+    private(set) var vault: Vault
     private var backends: [UUID: any QuotaBackend] = [:]
     private var refreshTask: Task<Void, Never>?
 
     init(vault: Vault = Vault(), startAutomaticRefresh: Bool = true) {
         self.vault = vault
-        load()
-        if startAutomaticRefresh {
-            refreshTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(1))
-                await self?.refreshAll()
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(15 * 60))
-                    guard !Task.isCancelled else { break }
-                    await self?.refreshAll()
-                }
+        if usesDefaultVault, Vault.needsPreviousRootMigration(to: vault) {
+            Task {
+                await adoptPreviousVault()
+                load()
+                if startAutomaticRefresh { scheduleRefresh() }
             }
+        } else {
+            load()
+            if startAutomaticRefresh { scheduleRefresh() }
         }
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -36,6 +34,25 @@ final class AccountStore: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in await self?.shutdown() }
+        }
+    }
+
+    /// Only the real vault adopts older data; a vault chosen with
+    /// SUBSCRIPTION_MANAGER_HOME (tests, experiments) never does.
+    private var usesDefaultVault: Bool {
+        vault.root == Vault.defaultRoot.standardizedFileURL
+            && ProcessInfo.processInfo.environment["SUBSCRIPTION_MANAGER_HOME"] == nil
+    }
+
+    private func scheduleRefresh() {
+        refreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            await self?.refreshAll()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15 * 60))
+                guard !Task.isCancelled else { break }
+                await self?.refreshAll()
+            }
         }
     }
 
@@ -263,11 +280,7 @@ final class AccountStore: ObservableObject {
     private func load() {
         do {
             try vault.ensureRoot()
-            // Only the real vault adopts Codex Quota 1.x data; a vault chosen
-            // with QUOTA_MANAGER_HOME (tests, experiments) never does.
-            if vault.root == Vault.defaultRoot.standardizedFileURL,
-               ProcessInfo.processInfo.environment["QUOTA_MANAGER_HOME"] == nil,
-               let migrated = try vault.migrateLegacy() {
+            if usesDefaultVault, let migrated = try vault.migrateLegacy() {
                 accounts = migrated
             } else {
                 accounts = (try? vault.loadAccounts()) ?? []
@@ -293,6 +306,47 @@ final class AccountStore: ObservableObject {
         states = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.quota == nil ? .idle : .ready) })
         vault.writeAgentGuide()
         persist()
+    }
+
+    /// Moves the Quota Manager folder (`~/.quota-manager`) to the current
+    /// vault. Claude Code keys each login on its folder path, so every Claude
+    /// Keychain item is copied to the new path first, verified after the move,
+    /// and only then removed from the old path. Any failure puts everything back.
+    private func adoptPreviousVault() async {
+        let previous = Vault(root: Vault.previousRoot)
+        guard let previousAccounts = try? previous.loadAccounts() else { return }
+        var moved: [(old: String, new: String)] = []
+
+        func rollBack(_ reason: String, folderMoved: Bool) async {
+            if folderMoved { try? FileManager.default.moveItem(at: vault.root, to: previous.root) }
+            for item in moved { await ClaudeKeychain.delete(configDirectory: item.new) }
+            vault = previous
+            globalError = "Still using \(previous.root.path): \(reason)"
+        }
+
+        do {
+            for account in previousAccounts where account.provider == .claude {
+                let oldPath = previous.homePath(for: account)
+                let newPath = vault.homePath(for: account)
+                if let secret = try await ClaudeKeychain.read(configDirectory: oldPath) {
+                    try await ClaudeKeychain.write(secret, configDirectory: newPath)
+                    moved.append((oldPath, newPath))
+                }
+            }
+            try FileManager.default.moveItem(at: previous.root, to: vault.root)
+        } catch {
+            await rollBack("could not move it (\(error.localizedDescription)).", folderMoved: false)
+            return
+        }
+
+        for item in moved {
+            let status = try? await ClaudeCLIClient(homeURL: URL(fileURLWithPath: item.new)).authStatus()
+            guard status?["loggedIn"]?.boolValue == true else {
+                await rollBack("Claude Code did not accept the moved login for \(item.new).", folderMoved: true)
+                return
+            }
+        }
+        for item in moved { await ClaudeKeychain.delete(configDirectory: item.old) }
     }
 
     private func persist() {

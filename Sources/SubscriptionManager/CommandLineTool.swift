@@ -29,7 +29,7 @@ enum EnvironmentSnippet {
     }
 }
 
-/// `quota-manager <command>`: lets agents list, choose and switch to accounts
+/// `subscription-manager <command>`: lets agents list, choose and switch to accounts
 /// stored in the credentials folder. It only reads the manifest the app keeps
 /// up to date, so it is fast and never touches credentials.
 enum CommandLineTool {
@@ -59,16 +59,16 @@ enum CommandLineTool {
                 return 0
             }
         } catch let error as CLIError {
-            FileHandle.standardError.write(Data("quota-manager: \(error.message)\n".utf8))
+            FileHandle.standardError.write(Data("subscription-manager: \(error.message)\n".utf8))
             return error.code
         } catch {
-            FileHandle.standardError.write(Data("quota-manager: \(error.localizedDescription)\n".utf8))
+            FileHandle.standardError.write(Data("subscription-manager: \(error.localizedDescription)\n".utf8))
             return 1
         }
     }
 
     static let usage = """
-    Usage: quota-manager <command>
+    Usage: subscription-manager <command>
 
     Accounts live in \(Vault().root.path)/<provider>/<slug> and are
     addressed as <provider>/<slug>, for example claude/victor-uthereal.
@@ -85,8 +85,8 @@ enum CommandLineTool {
     Quota figures come from the menu bar app and refresh every 15 minutes.
 
     Examples:
-      eval "$(quota-manager env claude/work)"
-      quota-manager exec "$(quota-manager pick codex)" -- codex exec "fix the tests"
+      eval "$(subscription-manager env claude/work)"
+      subscription-manager exec "$(subscription-manager pick codex)" -- codex exec "fix the tests"
     """
 
     struct CLIError: Error {
@@ -127,7 +127,7 @@ enum CommandLineTool {
         }
 
         guard !accounts.isEmpty else {
-            print("No accounts yet. Add one from the Quota Manager menu bar app.")
+            print("No accounts yet. Add one from the Subscription Manager menu bar app.")
             return 0
         }
         let now = Date()
@@ -198,7 +198,7 @@ enum CommandLineTool {
 
     private static func load(_ vault: Vault) throws -> [AccountRecord] {
         guard FileManager.default.fileExists(atPath: vault.manifestURL.path) else {
-            throw CLIError(message: "no accounts found at \(vault.manifestURL.path). Open the Quota Manager app and add one.")
+            throw CLIError(message: "no accounts found at \(vault.manifestURL.path). Open the Subscription Manager app and add one.")
         }
         return try vault.loadAccounts()
     }

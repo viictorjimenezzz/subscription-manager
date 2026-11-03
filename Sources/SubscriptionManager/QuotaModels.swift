@@ -32,16 +32,19 @@ enum Provider: String, Codable, CaseIterable, Sendable, Identifiable {
 
     var logoAsset: String {
         switch self {
-        case .codex: return "codex-color.png"
+        case .codex: return "openai-white.png"
         case .claude: return "claude-color.png"
         }
     }
+
+    /// Monochrome logos follow the text color instead of keeping their own.
+    var logoIsTemplate: Bool { self == .codex }
 }
 
 struct AccountRecord: Codable, Identifiable, Sendable, Equatable {
     let id: UUID
     var provider: Provider
-    /// Folder name inside `~/.quota-manager/<provider>/`. Agents select an
+    /// Folder name inside `~/.subscription-manager/<provider>/`. Agents select an
     /// account with `<provider>/<slug>`.
     var slug: String
     var email: String?

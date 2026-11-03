@@ -2,11 +2,11 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-app_name="Quota Manager"
-executable_name="quota-manager"
+app_name="Subscription Manager"
+executable_name="subscription-manager"
 bundle_dir="$project_dir/dist/$app_name.app"
 icon_source="$project_dir/Resources/Assets/app-icon.png"
-icon_work_dir="$(mktemp -d /tmp/quota-manager-icon.XXXXXX)"
+icon_work_dir="$(mktemp -d /tmp/subscription-manager-icon.XXXXXX)"
 iconset_dir="$icon_work_dir/AppIcon.iconset"
 trap 'rm -rf "$icon_work_dir"' EXIT
 

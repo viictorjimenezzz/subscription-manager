@@ -2,7 +2,7 @@ import Foundation
 
 /// The on-disk credentials folder shared with agents:
 ///
-///     ~/.quota-manager/
+///     ~/.subscription-manager/
 ///       accounts.json        manifest (accounts, quota, home folders, env vars)
 ///       README.md            instructions for agents
 ///       codex/<slug>/        a CODEX_HOME
@@ -21,10 +21,21 @@ struct Vault: Sendable {
     }
 
     static var defaultRoot: URL {
-        if let override = ProcessInfo.processInfo.environment["QUOTA_MANAGER_HOME"], !override.isEmpty {
+        if let override = ProcessInfo.processInfo.environment["SUBSCRIPTION_MANAGER_HOME"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
         }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".quota-manager", isDirectory: true)
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".subscription-manager", isDirectory: true)
+    }
+
+    /// Where Quota Manager 2.x kept the vault.
+    static var previousRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".quota-manager", isDirectory: true)
+    }
+
+    static func needsPreviousRootMigration(to vault: Vault) -> Bool {
+        let fileManager = FileManager.default
+        return !fileManager.fileExists(atPath: vault.root.path)
+            && fileManager.fileExists(atPath: Vault(root: previousRoot).manifestURL.path)
     }
 
     static var legacyRoot: URL {
@@ -242,9 +253,9 @@ struct Vault: Sendable {
     func writeAgentGuide() {
         let root = root.path
         let guide = """
-        # Quota Manager credentials
+        # Subscription Manager credentials
 
-        This folder is managed by the Quota Manager menu bar app. Each subfolder is a
+        This folder is managed by the Subscription Manager menu bar app. Each subfolder is a
         logged-in Codex or Claude Code subscription account that agents can switch to
         without logging in again.
 
@@ -254,13 +265,13 @@ struct Vault: Sendable {
         email, plan, remaining quota (`quota.windows`, refreshed every 15 minutes) and the
         exact environment to use (`env`).
 
-        The `quota-manager` command reads the same file:
+        The `subscription-manager` command reads the same file:
 
         ```sh
-        quota-manager list                        # accounts and remaining quota
-        quota-manager pick claude                 # the Claude account with the most quota left
-        quota-manager env claude/<slug>           # shell lines that select an account
-        quota-manager exec codex/<slug> -- codex exec "…"
+        subscription-manager list                        # accounts and remaining quota
+        subscription-manager pick claude                 # the Claude account with the most quota left
+        subscription-manager env claude/<slug>           # shell lines that select an account
+        subscription-manager exec codex/<slug> -- codex exec "…"
         ```
 
         ## Use an account directly
@@ -320,7 +331,7 @@ enum SharedConfig {
         }
     }
 
-    private static let ledgerName = ".quota-manager-links"
+    private static let ledgerName = ".subscription-manager-links"
 
     /// Links each shared item once. Items listed in the ledger are not
     /// recreated, so deleting a link opts that account out permanently.
@@ -328,8 +339,15 @@ enum SharedConfig {
         let fileManager = FileManager.default
         let source = source ?? sourceDirectory(for: provider)
         let ledger = home.appendingPathComponent(ledgerName)
-        var handled = Set((try? String(contentsOf: ledger, encoding: .utf8))?.split(separator: "\n").map(String.init) ?? [])
-        let before = handled.count
+        let previousLedger = home.appendingPathComponent(".quota-manager-links")
+        var handled = Set([ledger, previousLedger].flatMap {
+            (try? String(contentsOf: $0, encoding: .utf8))?.split(separator: "\n").map(String.init) ?? []
+        })
+        var before = handled.count
+        if FileManager.default.fileExists(atPath: previousLedger.path) {
+            try? FileManager.default.removeItem(at: previousLedger)
+            before = -1
+        }
 
         for item in sharedItems(for: provider) where !handled.contains(item) {
             let target = source.appendingPathComponent(item)

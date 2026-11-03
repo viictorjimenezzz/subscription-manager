@@ -14,7 +14,7 @@ enum ClaudeClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .executableNotFound:
-            return "Claude Code was not found. Install it (brew install --cask claude-code), then reopen Quota Manager."
+            return "Claude Code was not found. Install it (brew install --cask claude-code), then reopen Subscription Manager."
         case .commandFailed(let detail): return "Claude Code failed: \(detail)"
         case .timedOut: return "Claude Code did not respond in time."
         case .notLoggedIn: return "This account needs to be connected again."

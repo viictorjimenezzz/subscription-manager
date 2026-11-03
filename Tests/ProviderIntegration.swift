@@ -85,7 +85,7 @@ struct ProviderIntegrationTest {
 
     private static func temporaryDirectory(_ name: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("quota-manager-integration-\(name)-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("subscription-manager-integration-\(name)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

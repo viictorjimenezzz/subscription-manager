@@ -1,12 +1,12 @@
 #!/bin/zsh
 # Checks every stored account the way an agent would use it: the folder is
-# selected through `quota-manager exec`, the provider CLI must see the expected
+# selected through `subscription-manager exec`, the provider CLI must see the expected
 # login there, and the app must have read fresh quota for it. Read-only: it
 # never logs in, logs out, or refreshes tokens itself.
 set -euo pipefail
 
-cli="${QUOTA_MANAGER_CLI:-quota-manager}"
-command -v "$cli" >/dev/null || { echo "quota-manager is not on PATH; run ./scripts/install.sh"; exit 1; }
+cli="${SUBSCRIPTION_MANAGER_CLI:-subscription-manager}"
+command -v "$cli" >/dev/null || { echo "subscription-manager is not on PATH; run ./scripts/install.sh"; exit 1; }
 
 "$cli" list --json | CLI="$cli" python3 /dev/fd/3 3<<'PYTHON'
 import json, os, subprocess, sys
