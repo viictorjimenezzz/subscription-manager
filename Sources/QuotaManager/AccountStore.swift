@@ -64,28 +64,40 @@ final class AccountStore: ObservableObject {
             return
         }
         accounts.append(record)
-        states[record.id] = .connecting
         persist()
+        await signIn(record.id)
+    }
 
+    /// Signs in again inside the existing folder, so the account keeps its
+    /// name, settings and history and agents keep working.
+    func reconnect(_ id: UUID) async {
+        guard activeLogin == nil, accounts.contains(where: { $0.id == id }) else { return }
+        globalError = nil
+        await signIn(id)
+    }
+
+    private func signIn(_ id: UUID) async {
+        guard let record = accounts.first(where: { $0.id == id }) else { return }
+        states[id] = .connecting
         do {
             let backend = backend(for: record)
             let instructions = try await backend.beginLogin()
-            activeLogin = (record.id, instructions)
-            states[record.id] = .awaitingLogin
+            activeLogin = (id, instructions)
+            states[id] = .awaitingLogin
             if !instructions.browserOpened { NSWorkspace.shared.open(instructions.authURL) }
 
             let success = await backend.waitForLogin(id: instructions.loginID)
-            guard accounts.contains(where: { $0.id == record.id }) else { return }
-            if activeLogin?.accountID == record.id { activeLogin = nil }
+            guard accounts.contains(where: { $0.id == id }) else { return }
+            if activeLogin?.accountID == id { activeLogin = nil }
             if success {
-                states[record.id] = .idle
-                await refresh(record.id, refreshingToken: true)
-            } else if states[record.id] == .awaitingLogin {
-                states[record.id] = .failed("Login was not completed.")
+                states[id] = .idle
+                await refresh(id, refreshingToken: true)
+            } else if states[id] == .awaitingLogin {
+                states[id] = .failed("Login was not completed.")
             }
         } catch {
-            if activeLogin?.accountID == record.id { activeLogin = nil }
-            states[record.id] = .failed(error.localizedDescription)
+            if activeLogin?.accountID == id { activeLogin = nil }
+            states[id] = .failed(error.localizedDescription)
         }
     }
 
@@ -103,12 +115,6 @@ final class AccountStore: ObservableObject {
         activeLogin = nil
         states[login.accountID] = .failed("Login cancelled.")
         await backend.cancelLogin(id: login.instructions.loginID)
-    }
-
-    func retryLogin(_ id: UUID) async {
-        guard let provider = accounts.first(where: { $0.id == id })?.provider else { return }
-        await remove(id)
-        await addAccount(provider)
     }
 
     // MARK: Refresh

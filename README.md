@@ -39,7 +39,7 @@ Upgrading from **Codex Quota**: the installer quits and removes the old app. On 
 2. Finish signing in in the browser window that opens. For Claude Code, if the browser shows a code instead of returning automatically, paste it into the field in the popover.
 3. The account folder is named after the email, for example `claude/victor-uthereal`. Use **Rename folder…** in the account's menu to choose another name.
 
-Both CLIs refresh their tokens automatically. A new browser login is only needed if a provider revokes the session.
+Both CLIs refresh their tokens automatically. A new browser login is only needed if a provider revokes the session; then click **Sign in** on the account row. It signs in again inside the same folder, so the account keeps its name and agents keep working.
 
 ## Switching accounts from agents
 

@@ -234,13 +234,10 @@ private struct AccountRow: View {
                 .foregroundStyle(.tertiary)
 
                 if case .failed(let message) = state {
-                    Text(message).font(.caption2).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    failure(message)
                 }
             } else if case .failed(let message) = state {
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+                failure(message)
             } else {
                 Text(state == .awaitingLogin ? "Finish signing in in your browser" : "Waiting for quota data")
                     .font(.caption2)
@@ -250,6 +247,20 @@ private struct AccountRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
         .help(account.lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? "")
+    }
+
+    private func failure(_ message: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(message)
+                .font(.caption2)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Sign in") { Task { await store.reconnect(account.id) } }
+                .buttonStyle(.link)
+                .font(.caption2)
+                .disabled(store.activeLogin != nil)
+        }
     }
 
     private var subtitle: String {
@@ -272,9 +283,8 @@ private struct AccountRow: View {
                 editingSlug = account.slug
             }
             Divider()
-            if case .failed = state {
-                Button("Reconnect") { Task { await store.retryLogin(account.id) } }
-            }
+            Button("Sign in again") { Task { await store.reconnect(account.id) } }
+                .disabled(store.activeLogin != nil || state.isBusy)
             Button("Remove account", role: .destructive) { Task { await store.remove(account.id) } }
         } label: {
             Image(systemName: "chevron.down")
