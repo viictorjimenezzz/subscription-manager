@@ -18,6 +18,10 @@ struct QuotaManagerApp: App {
 @main
 enum Entry {
     static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if CommandLineTool.shouldHandle(arguments) {
+            exit(CommandLineTool.run(arguments))
+        }
         QuotaManagerApp.main()
     }
 }

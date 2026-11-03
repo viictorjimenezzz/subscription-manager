@@ -2,15 +2,20 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
+sources="$project_dir/Sources/QuotaManager"
 test_dir="$(mktemp -d /tmp/quota-manager-integration.XXXXXX)"
 trap 'rm -rf "$test_dir"' EXIT
 
 swiftc \
-  "$project_dir/Sources/QuotaManager/JSONValue.swift" \
-  "$project_dir/Sources/QuotaManager/QuotaModels.swift" \
-  "$project_dir/Sources/QuotaManager/CodexAppServerClient.swift" \
-  "$project_dir/Tests/AppServerIntegration.swift" \
+  "$sources/JSONValue.swift" \
+  "$sources/QuotaModels.swift" \
+  "$sources/ClaudeUsageParser.swift" \
+  "$sources/Vault.swift" \
+  "$sources/QuotaBackend.swift" \
+  "$sources/CodexAppServerClient.swift" \
+  "$sources/ClaudeCLIClient.swift" \
+  "$project_dir/Tests/ProviderIntegration.swift" \
   -parse-as-library \
-  -o "$test_dir/app-server-integration"
+  -o "$test_dir/provider-integration"
 
-"$test_dir/app-server-integration"
+"$test_dir/provider-integration"

@@ -4,7 +4,7 @@ import ServiceManagement
 
 @MainActor
 final class AccountStore: ObservableObject {
-    static let maximumAccounts = 4
+    static let maximumAccountsPerProvider = 6
 
     @Published private(set) var accounts: [AccountRecord] = []
     @Published private(set) var states: [UUID: AccountRuntimeState] = [:]
@@ -12,16 +12,12 @@ final class AccountStore: ObservableObject {
     @Published var globalError: String?
     @Published private(set) var isRefreshingAll = false
 
-    private var clients: [UUID: CodexAppServerClient] = [:]
+    let vault: Vault
+    private var backends: [UUID: any QuotaBackend] = [:]
     private var refreshTask: Task<Void, Never>?
-    private let rootURL: URL
-    private let recordsURL: URL
 
-    init(baseURL: URL? = nil, startAutomaticRefresh: Bool = true) {
-        let support = baseURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CodexQuota", isDirectory: true)
-        rootURL = support
-        recordsURL = support.appendingPathComponent("accounts.json")
+    init(vault: Vault = Vault(), startAutomaticRefresh: Bool = true) {
+        self.vault = vault
         load()
         if startAutomaticRefresh {
             refreshTask = Task { [weak self] in
@@ -45,44 +41,77 @@ final class AccountStore: ObservableObject {
 
     deinit { refreshTask?.cancel() }
 
-    var canAddAccount: Bool { accounts.count < Self.maximumAccounts }
+    func accounts(for provider: Provider) -> [AccountRecord] {
+        accounts.filter { $0.provider == provider }
+    }
 
-    func addAccount() async {
-        guard canAddAccount, activeLogin == nil else { return }
+    func canAddAccount(_ provider: Provider) -> Bool {
+        accounts(for: provider).count < Self.maximumAccountsPerProvider
+    }
+
+    func homePath(for account: AccountRecord) -> String { vault.homePath(for: account) }
+
+    // MARK: Login
+
+    func addAccount(_ provider: Provider) async {
+        guard canAddAccount(provider), activeLogin == nil else { return }
         globalError = nil
-        let record = AccountRecord(name: "Account \(accounts.count + 1)")
+        let record = AccountRecord(provider: provider, slug: Vault.provisionalSlug())
+        do {
+            try vault.prepareHome(for: record)
+        } catch {
+            globalError = "Could not create the account folder: \(error.localizedDescription)"
+            return
+        }
         accounts.append(record)
         states[record.id] = .connecting
         persist()
 
         do {
-            let client = client(for: record.id)
-            let instructions = try await client.beginLogin()
+            let backend = backend(for: record)
+            let instructions = try await backend.beginLogin()
             activeLogin = (record.id, instructions)
             states[record.id] = .awaitingLogin
-            NSWorkspace.shared.open(instructions.authURL)
+            if !instructions.browserOpened { NSWorkspace.shared.open(instructions.authURL) }
 
-            let success = await client.waitForLogin(id: instructions.loginID)
+            let success = await backend.waitForLogin(id: instructions.loginID)
             guard accounts.contains(where: { $0.id == record.id }) else { return }
-            activeLogin = nil
+            if activeLogin?.accountID == record.id { activeLogin = nil }
             if success {
                 states[record.id] = .idle
                 await refresh(record.id, refreshingToken: true)
-            } else {
+            } else if states[record.id] == .awaitingLogin {
                 states[record.id] = .failed("Login was not completed.")
             }
         } catch {
-            activeLogin = nil
+            if activeLogin?.accountID == record.id { activeLogin = nil }
             states[record.id] = .failed(error.localizedDescription)
         }
     }
 
+    func submitLoginCode(_ code: String) async {
+        guard let login = activeLogin, let backend = backends[login.accountID] else { return }
+        do {
+            try await backend.submitLoginCode(code, loginID: login.instructions.loginID)
+        } catch {
+            globalError = error.localizedDescription
+        }
+    }
+
     func cancelActiveLogin() async {
-        guard let login = activeLogin, let client = clients[login.accountID] else { return }
-        await client.cancelLogin(id: login.instructions.loginID)
+        guard let login = activeLogin, let backend = backends[login.accountID] else { return }
         activeLogin = nil
         states[login.accountID] = .failed("Login cancelled.")
+        await backend.cancelLogin(id: login.instructions.loginID)
     }
+
+    func retryLogin(_ id: UUID) async {
+        guard let provider = accounts.first(where: { $0.id == id })?.provider else { return }
+        await remove(id)
+        await addAccount(provider)
+    }
+
+    // MARK: Refresh
 
     func refreshAll() async {
         guard !isRefreshingAll else { return }
@@ -99,103 +128,164 @@ final class AccountStore: ObservableObject {
     }
 
     func refresh(_ id: UUID, refreshingToken: Bool = false) async {
-        guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        guard let account = accounts.first(where: { $0.id == id }) else { return }
         switch states[id] {
         case .connecting, .awaitingLogin, .refreshing: return
         default: break
         }
         states[id] = .refreshing
         do {
-            let client = client(for: id)
-            let accountPayload = try await client.account(refreshToken: refreshingToken)
-            // A forced token refresh can succeed while the current app-server
-            // response omits the account object. Read the account normally
-            // before treating the session as disconnected.
-            let identityPayload: JSONValue
-            if CodexPayloadParser.account(from: accountPayload) != nil {
-                identityPayload = accountPayload
-            } else if refreshingToken {
-                identityPayload = try await client.account(refreshToken: false)
-            } else {
-                identityPayload = accountPayload
-            }
-            guard let identity = CodexPayloadParser.account(from: identityPayload) else {
-                throw CodexClientError.notLoggedIn
-            }
-            let limitsPayload = try await client.rateLimits()
-            guard let quota = CodexPayloadParser.weeklyQuota(from: limitsPayload) else {
-                throw CodexClientError.noWeeklyQuota
-            }
-
-            accounts[index].email = identity.email
-            accounts[index].plan = identity.plan
-            accounts[index].quota = quota
+            let status = try await backend(for: account).status(refreshingToken: refreshingToken)
+            guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+            accounts[index].email = status.email ?? accounts[index].email
+            accounts[index].plan = status.plan
+            accounts[index].quota = status.quota
             accounts[index].lastUpdated = Date()
-            if let email = identity.email, accounts[index].name.hasPrefix("Account ") {
-                accounts[index].name = email.components(separatedBy: "@").first ?? accounts[index].name
-            }
             states[id] = .ready
             persist()
+
+            if accounts[index].isProvisional, let email = status.email {
+                let slug = vault.uniqueSlug(Vault.slug(fromEmail: email), provider: account.provider, taken: takenSlugs(account.provider, excluding: id))
+                do {
+                    try await rename(id, to: slug)
+                } catch {
+                    globalError = "Connected, but could not name the folder “\(slug)”: \(error.localizedDescription)"
+                }
+            }
         } catch {
             states[id] = .failed(error.localizedDescription)
         }
     }
 
-    func remove(_ id: UUID) async {
-        if activeLogin?.accountID == id { await cancelActiveLogin() }
-        if let client = clients.removeValue(forKey: id) {
-            await client.logout()
-            await client.stop()
+    // MARK: Folder management
+
+    /// Renames an account folder. Agents address accounts by this name, so
+    /// the folder is moved in place; for Claude the Keychain item keyed on the
+    /// folder path moves with it.
+    func rename(_ id: UUID, to newSlug: String) async throws {
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        let account = accounts[index]
+        guard newSlug != account.slug else { return }
+        guard Vault.isValidSlug(newSlug) else { throw VaultError.invalidSlug(newSlug) }
+        guard !takenSlugs(account.provider, excluding: id).contains(newSlug) else { throw VaultError.slugTaken(newSlug) }
+
+        let previousState = states[id]
+        states[id] = .refreshing
+        defer { if states[id] == .refreshing { states[id] = previousState ?? .idle } }
+
+        if let backend = backends.removeValue(forKey: id) { await backend.stop() }
+
+        var renamed = account
+        renamed.slug = newSlug
+        let oldPath = vault.homePath(for: account)
+        let newPath = vault.homePath(for: renamed)
+
+        var movedSecret = false
+        if account.provider == .claude, let secret = try await ClaudeKeychain.read(configDirectory: oldPath) {
+            try await ClaudeKeychain.write(secret, configDirectory: newPath)
+            movedSecret = true
         }
-        accounts.removeAll { $0.id == id }
-        states.removeValue(forKey: id)
-        let profile = profileURL(for: id)
-        try? FileManager.default.removeItem(at: profile)
+
+        do {
+            try vault.moveHome(of: account, toSlug: newSlug)
+        } catch {
+            if movedSecret { await ClaudeKeychain.delete(configDirectory: newPath) }
+            throw error
+        }
+
+        if movedSecret {
+            let check = ClaudeCLIClient(homeURL: vault.home(for: renamed))
+            let loggedIn = (try? await check.authStatus())?["loggedIn"]?.boolValue == true
+            guard loggedIn else {
+                try? vault.moveHome(of: renamed, toSlug: account.slug)
+                await ClaudeKeychain.delete(configDirectory: newPath)
+                throw ClaudeClientError.keychain("Claude Code did not accept the moved login.")
+            }
+            await ClaudeKeychain.delete(configDirectory: oldPath)
+        }
+
+        accounts[index] = renamed
         persist()
     }
 
-    func retryLogin(_ id: UUID) async {
-        await remove(id)
-        await addAccount()
+    func remove(_ id: UUID) async {
+        guard let account = accounts.first(where: { $0.id == id }) else { return }
+        if activeLogin?.accountID == id { await cancelActiveLogin() }
+        let backend = backends.removeValue(forKey: id) ?? makeBackend(for: account)
+        await backend.logout()
+        await backend.stop()
+        accounts.removeAll { $0.id == id }
+        states.removeValue(forKey: id)
+        vault.removeHome(of: account)
+        persist()
     }
 
     func shutdown() async {
         refreshTask?.cancel()
-        let activeClients = clients.values
-        clients.removeAll()
-        for client in activeClients { await client.stop() }
+        let active = backends.values
+        backends.removeAll()
+        for backend in active { await backend.stop() }
     }
 
-    private func client(for id: UUID) -> CodexAppServerClient {
-        if let existing = clients[id] { return existing }
-        let new = CodexAppServerClient(profileURL: profileURL(for: id))
-        clients[id] = new
+    // MARK: Private
+
+    private func takenSlugs(_ provider: Provider, excluding id: UUID) -> Set<String> {
+        Set(accounts.filter { $0.provider == provider && $0.id != id }.map(\.slug))
+    }
+
+    private func backend(for account: AccountRecord) -> any QuotaBackend {
+        if let existing = backends[account.id] { return existing }
+        let new = makeBackend(for: account)
+        backends[account.id] = new
         return new
     }
 
-    private func profileURL(for id: UUID) -> URL {
-        rootURL.appendingPathComponent("Profiles", isDirectory: true).appendingPathComponent(id.uuidString, isDirectory: true)
+    private func makeBackend(for account: AccountRecord) -> any QuotaBackend {
+        let home = vault.home(for: account)
+        switch account.provider {
+        case .codex: return CodexAppServerClient(profileURL: home)
+        case .claude: return ClaudeCLIClient(homeURL: home)
+        }
     }
 
     private func load() {
         do {
-            try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let data = try Data(contentsOf: recordsURL)
-            accounts = try JSONDecoder().decode([AccountRecord].self, from: data)
-            states = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.quota == nil ? .idle : .ready) })
+            try vault.ensureRoot()
+            // Only the real vault adopts Codex Quota 1.x data; a vault chosen
+            // with QUOTA_MANAGER_HOME (tests, experiments) never does.
+            if vault.root == Vault.defaultRoot.standardizedFileURL,
+               ProcessInfo.processInfo.environment["QUOTA_MANAGER_HOME"] == nil,
+               let migrated = try vault.migrateLegacy() {
+                accounts = migrated
+            } else {
+                accounts = (try? vault.loadAccounts()) ?? []
+            }
         } catch {
-            accounts = []
-            states = [:]
+            accounts = (try? vault.loadAccounts()) ?? []
+            globalError = "Could not prepare \(vault.root.path): \(error.localizedDescription)"
         }
+        // Folders left by a login that never finished.
+        let abandoned = accounts.filter { $0.isProvisional && $0.email == nil }
+        for account in abandoned {
+            if account.provider == .claude {
+                let path = vault.homePath(for: account)
+                Task.detached { await ClaudeKeychain.delete(configDirectory: path) }
+            }
+            vault.removeHome(of: account)
+        }
+        accounts.removeAll { account in abandoned.contains(where: { $0.id == account.id }) }
+
+        for account in accounts {
+            SharedConfig.link(provider: account.provider, into: vault.home(for: account))
+        }
+        states = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.quota == nil ? .idle : .ready) })
+        vault.writeAgentGuide()
+        persist()
     }
 
     private func persist() {
         do {
-            try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(accounts).write(to: recordsURL, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: recordsURL.path)
+            try vault.save(accounts)
         } catch {
             globalError = "Could not save account settings: \(error.localizedDescription)"
         }

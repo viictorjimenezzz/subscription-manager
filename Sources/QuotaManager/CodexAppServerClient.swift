@@ -12,7 +12,7 @@ enum CodexClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .executableNotFound:
-            return "Codex CLI was not found. Install it with Homebrew, then reopen Quota Manager."
+            return "Codex CLI was not found. Install it (brew install --cask codex), then reopen Quota Manager."
         case .launchFailed(let detail): return "Could not start Codex: \(detail)"
         case .serverStopped(let detail): return "Codex stopped unexpectedly: \(detail)"
         case .malformedResponse: return "Codex returned an unreadable response."
@@ -25,16 +25,7 @@ enum CodexClientError: LocalizedError {
 
 enum CodexLocator {
     static func executableURL() -> URL? {
-        var candidates: [String] = []
-        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("codex").path {
-            candidates.append(bundled)
-        }
-        candidates += [
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex",
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/codex").path
-        ]
-        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }).map(URL.init(fileURLWithPath:))
+        ExecutableLocator.find("codex")
     }
 }
 
@@ -130,7 +121,7 @@ actor CodexAppServerClient {
         guard let id = result["loginId"]?.stringValue,
               let rawURL = result["authUrl"]?.stringValue,
               let url = URL(string: rawURL) else { throw CodexClientError.malformedResponse }
-        return LoginInstructions(loginID: id, authURL: url)
+        return LoginInstructions(loginID: id, authURL: url, browserOpened: false, acceptsCode: false)
     }
 
     func waitForLogin(id: String) async -> Bool {
