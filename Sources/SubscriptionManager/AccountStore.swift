@@ -147,12 +147,32 @@ final class AccountStore: ObservableObject {
             }
         }
         states[id] = .idle
-        if let outcome {
-            notice = "\(account.reference): \(outcome.message)"
-        } else {
+        guard let outcome else {
             globalError = "\(account.reference): could not apply the reset (\(lastError?.localizedDescription ?? "unknown error"))."
+            await refresh(id)
+            return
         }
-        await refresh(id)
+        guard outcome == .reset else {
+            notice = "\(account.reference): \(outcome.message)"
+            await refresh(id)
+            return
+        }
+
+        // Codex takes a few seconds to report the new limits, so keep reading
+        // until the weekly window changes instead of showing stale numbers.
+        notice = "\(account.reference): reset applied, waiting for Codex to report the new limits…"
+        let previous = account.quota?.weekly
+        for _ in 0..<10 {
+            await refresh(id)
+            let current = accounts.first(where: { $0.id == id })?.quota?.weekly
+            if let current, current.usedPercent != previous?.usedPercent || current.resetsAt != previous?.resetsAt {
+                let left = current.remainingPercent
+                notice = "\(account.reference): reset applied. \(left)% of the week left."
+                return
+            }
+            try? await Task.sleep(for: .seconds(3))
+        }
+        notice = "\(account.reference): reset applied. Codex has not reported the new limits yet; refresh again in a minute."
     }
 
     // MARK: Refresh
