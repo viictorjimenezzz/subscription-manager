@@ -104,6 +104,7 @@ The app only runs the locally installed `codex` and `claude` CLIs, which talk to
 ./scripts/test.sh               # self-tests (parsers, vault, migration, CLI)
 ./scripts/integration-test.sh   # talks to the installed codex and claude CLIs
 ./scripts/build-app.sh          # creates dist/Quota Manager.app
+./scripts/verify-accounts.sh    # checks every stored account works for agents (read-only)
 ```
 
 The test harnesses use `swiftc` directly, so they also run with only the Apple Command Line Tools installed. Set `QUOTA_MANAGER_HOME` to run the app or CLI against a scratch credentials folder; a scratch folder never adopts Codex Quota data.

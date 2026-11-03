@@ -78,6 +78,7 @@ final class AccountStore: ObservableObject {
 
     private func signIn(_ id: UUID) async {
         guard let record = accounts.first(where: { $0.id == id }) else { return }
+        let expectedEmail = record.isProvisional ? nil : record.email
         states[id] = .connecting
         do {
             let backend = backend(for: record)
@@ -92,6 +93,11 @@ final class AccountStore: ObservableObject {
             if success {
                 states[id] = .idle
                 await refresh(id, refreshingToken: true)
+                if let expectedEmail,
+                   let account = accounts.first(where: { $0.id == id }),
+                   let email = account.email, email.lowercased() != expectedEmail.lowercased() {
+                    globalError = "\(account.reference) was \(expectedEmail) but is now signed in as \(email). Sign in again with \(expectedEmail), or rename the folder."
+                }
             } else if states[id] == .awaitingLogin {
                 states[id] = .failed("Login was not completed.")
             }
