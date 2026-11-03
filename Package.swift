@@ -3,15 +3,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "CodexQuota",
+    name: "QuotaManager",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "CodexQuota", targets: ["CodexQuota"])
+        .executable(name: "quota-manager", targets: ["QuotaManager"])
     ],
     targets: [
         .executableTarget(
-            name: "CodexQuota",
-            path: "Sources/CodexQuota"
+            name: "QuotaManager",
+            path: "Sources/QuotaManager"
         )
     ]
 )

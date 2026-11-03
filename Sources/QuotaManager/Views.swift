@@ -24,7 +24,7 @@ struct QuotaPopoverView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Codex Weekly Quota")
+            Text("Quota Manager")
                 .font(.system(size: 13.5, weight: .semibold, design: .rounded))
             Spacer()
             Button {
@@ -49,7 +49,7 @@ struct QuotaPopoverView: View {
                 Image(systemName: "gauge.with.dots.needle.33percent")
                     .font(.system(size: 28, weight: .light))
                     .foregroundStyle(.secondary)
-                Text("Keep every Codex account in view.")
+                Text("Keep every Codex and Claude account in view.")
                     .font(.system(size: 13, weight: .medium))
                 Button("Connect an account") {
                     Task { await store.addAccount() }
@@ -116,7 +116,7 @@ struct QuotaPopoverView: View {
                     }
                 ))
                 Divider()
-                Button("Quit Codex Quota") { NSApplication.shared.terminate(nil) }
+                Button("Quit Quota Manager") { NSApplication.shared.terminate(nil) }
             } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))

@@ -4,7 +4,7 @@ import Foundation
 struct AppServerIntegrationTest {
     static func main() async throws {
         let profile = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codex-quota-integration-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("quota-manager-integration-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: profile) }
 
         let client = CodexAppServerClient(profileURL: profile)
